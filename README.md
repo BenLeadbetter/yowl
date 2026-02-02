@@ -47,7 +47,8 @@ Early days! The kitten scaffolding is in place, but the Rust daemon is still bei
 
 ## License
 
-TBD
+* MIT
+* Apache 2.0
 
 ---
 
