@@ -49,6 +49,14 @@ class Client:
         """Send PING and return True if PONG received."""
         return self.send("PING") == "PONG"
 
+    def start(self) -> str:
+        """Send START command and return the response."""
+        return self.send("START")
+
+    def stop(self) -> str:
+        """Send STOP command and return the response."""
+        return self.send("STOP")
+
     def __enter__(self) -> "Client":
         self.connect()
         return self

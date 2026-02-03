@@ -86,6 +86,14 @@ pub fn handle_command(cmd: &str) -> String {
     let parts: Vec<&str> = cmd.splitn(2, ' ').collect();
     match parts[0].to_uppercase().as_str() {
         "PING" => "PONG".to_string(),
+        "START" => {
+            log::info!("START command received - recording would begin here");
+            "OK".to_string()
+        }
+        "STOP" => {
+            log::info!("STOP command received - recording would end here");
+            "OK".to_string()
+        }
         _ => format!("ERROR unknown command: {}", parts[0]),
     }
 }
