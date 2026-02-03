@@ -5,6 +5,7 @@ edition = "2024"
 authors = ["ben_leadbetter@hotmail.com"]
 
 [dependencies]
+libc = "0.2"
 log = "0.4.29"
 # whisper-rs = "0.15.1"
 
