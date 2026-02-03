@@ -1,26 +1,31 @@
 """Yowl kitten - voice dictation for kitty terminal."""
 
+from kittens.tui.handler import result_handler
 from kitty.boss import Boss
 from yowl.ipc import Client
 
 
-def main(args: list[str]) -> str:
-    """Main entry point - runs in overlay window."""
+def main(args: list[str]) -> None:
+    """Not used when no_ui=True."""
+    pass
+
+
+@result_handler(no_ui=True)
+def handle_result(args: list[str], answer: str, target_window_id: int, boss: Boss) -> None:
+    """Handle the keybinding - runs directly in kitty process (no overlay)."""
     try:
         with Client() as client:
             if client.ping():
-                return "PONG - daemon is alive"
-            return "ERROR - unexpected response from daemon"
+                result = "PONG - daemon is alive"
+            else:
+                result = "ERROR - unexpected response from daemon"
     except FileNotFoundError:
-        return "ERROR - daemon socket not found"
+        result = "ERROR - daemon socket not found"
     except ConnectionRefusedError:
-        return "ERROR - daemon not responding"
+        result = "ERROR - daemon not responding"
     except Exception as e:
-        return f"ERROR - {e}"
+        result = f"ERROR - {e}"
 
-
-def handle_result(args: list[str], answer: str, target_window_id: int, boss: Boss) -> None:
-    """Handle the result from main() - runs in kitty process."""
     w = boss.window_id_map.get(target_window_id)
     if w is not None:
-        w.paste_text(answer)
+        w.paste_text(result)
