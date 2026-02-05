@@ -1,5 +1,6 @@
 mod ipc;
 mod logging;
+mod state;
 
 use std::io::ErrorKind;
 use std::time::Duration;
@@ -13,16 +14,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let server = ipc::Server::bind()?;
     server.set_nonblocking(true)?;
 
+    let state = state::DaemonState::new();
     let mut connection: Option<ipc::Connection> = None;
 
     loop {
-        // Check for parent exit
         if std::os::unix::process::parent_id() != parent_pid {
             log::info!("parent process exited, shutting down");
             break;
         }
 
-        // Accept new connection (non-blocking)
         match server.accept() {
             Ok(conn) => {
                 connection = Some(conn);
@@ -31,12 +31,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             Err(e) => log::warn!("accept error: {e}"),
         }
 
-        // Handle commands from connected client
         if let Some(ref mut conn) = connection {
             match conn.read_command() {
                 Ok(Some(cmd)) => {
                     log::debug!("received command: {cmd}");
-                    let response = ipc::handle_command(&cmd);
+                    let response = ipc::handle_command(&cmd, &state);
                     if let Err(e) = conn.send(&response) {
                         log::warn!("send error: {e}");
                         connection = None;

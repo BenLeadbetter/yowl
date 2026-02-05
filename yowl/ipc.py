@@ -57,6 +57,17 @@ class Client:
         """Send STOP command and return the response."""
         return self.send("STOP")
 
+    def poll(self) -> tuple[bool, str]:
+        """Send POLL command. Returns (is_recording, text)."""
+        response = self.send("POLL")
+        if response.startswith("RECORDING:"):
+            return (True, response[10:])
+        elif response.startswith("IDLE:"):
+            return (False, "")
+        else:
+            # Unexpected response, treat as not recording
+            return (False, "")
+
     def __enter__(self) -> "Client":
         self.connect()
         return self

@@ -1,6 +1,9 @@
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::PathBuf;
+use std::sync::Arc;
+
+use crate::state::DaemonState;
 
 pub fn socket_path() -> PathBuf {
     std::env::var("YOWL_SOCKET_PATH")
@@ -22,7 +25,7 @@ impl Server {
     pub fn bind() -> std::io::Result<Self> {
         let path = socket_path();
 
-        // Remove stale socket if it exists
+        // remove stale socket if it exists
         if path.exists() {
             std::fs::remove_file(&path)?;
         }
@@ -82,18 +85,13 @@ impl Connection {
     }
 }
 
-pub fn handle_command(cmd: &str) -> String {
+pub fn handle_command(cmd: &str, state: &Arc<DaemonState>) -> String {
     let parts: Vec<&str> = cmd.splitn(2, ' ').collect();
     match parts[0].to_uppercase().as_str() {
         "PING" => "PONG".to_string(),
-        "START" => {
-            log::info!("START command received - recording would begin here");
-            "OK".to_string()
-        }
-        "STOP" => {
-            log::info!("STOP command received - recording would end here");
-            "OK".to_string()
-        }
+        "START" => state.start_recording().to_string(),
+        "STOP" => state.stop_recording().to_string(),
+        "POLL" => state.poll(),
         _ => format!("ERROR unknown command: {}", parts[0]),
     }
 }
