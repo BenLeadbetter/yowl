@@ -1,13 +1,13 @@
 [package]
 name = "daemon"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
 authors = ["ben_leadbetter@hotmail.com"]
 
 [dependencies]
 libc = "0.2"
 log = "0.4.29"
-# whisper-rs = "0.15.1"
+whisper-rs = "0.15.1"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 oslog = "0.2.0"

@@ -1,6 +1,7 @@
 mod ipc;
 mod logging;
 mod state;
+mod whisper;
 
 use std::io::ErrorKind;
 use std::time::Duration;
