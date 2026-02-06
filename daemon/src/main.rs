@@ -13,10 +13,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let parent_pid = std::os::unix::process::parent_id();
     log::info!("yowl daemon started (parent_pid={parent_pid})");
 
+    log::info!("loading whisper model...");
+    let state = state::DaemonState::new()?;
+    log::info!("whisper model loaded");
+
     let server = ipc::Server::bind()?;
     server.set_nonblocking(true)?;
-
-    let state = state::DaemonState::new();
     let mut connection: Option<ipc::Connection> = None;
 
     loop {

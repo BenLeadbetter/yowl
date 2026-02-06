@@ -107,6 +107,8 @@ def handle_result(args: list[str], answer: str, target_window_id: int, boss: Bos
     except Exception as e:
         result = f"ERROR - {e}"
 
-    w = boss.window_id_map.get(target_window_id)
-    if w is not None:
-        w.paste_text(result)
+    # Only paste error messages, not success confirmations
+    if result.startswith("ERROR"):
+        w = boss.window_id_map.get(target_window_id)
+        if w is not None:
+            w.paste_text(result)
