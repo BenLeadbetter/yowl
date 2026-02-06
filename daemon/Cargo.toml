@@ -5,6 +5,7 @@ edition = "2021"
 authors = ["ben_leadbetter@hotmail.com"]
 
 [dependencies]
+cpal = "0.15"
 libc = "0.2"
 log = "0.4.29"
 whisper-rs = "0.15.1"

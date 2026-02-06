@@ -1,3 +1,4 @@
+mod audio;
 mod ipc;
 mod logging;
 mod state;
