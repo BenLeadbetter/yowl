@@ -57,16 +57,32 @@ class Client:
         """Send STOP command and return the response."""
         return self.send("STOP")
 
-    def poll(self) -> tuple[bool, str]:
-        """Send POLL command. Returns (is_recording, text)."""
+    def poll(self) -> tuple[bool, int, str]:
+        """Send POLL command. Returns (is_recording, backspace_count, text).
+
+        The backspace_count indicates how many characters to erase from the
+        terminal before inserting the new text, enabling smooth text replacement
+        as transcription is refined.
+        """
         response = self.send("POLL")
         if response.startswith("RECORDING:"):
-            return (True, response[10:])
+            # Format: RECORDING:<backspace_count>:<text>
+            rest = response[10:]  # After "RECORDING:"
+            colon_idx = rest.find(":")
+            if colon_idx >= 0:
+                try:
+                    backspace_count = int(rest[:colon_idx])
+                    text = rest[colon_idx + 1:]
+                    return (True, backspace_count, text)
+                except ValueError:
+                    pass
+            # Fallback for malformed response
+            return (True, 0, rest)
         elif response.startswith("IDLE:"):
-            return (False, "")
+            return (False, 0, "")
         else:
             # Unexpected response, treat as not recording
-            return (False, "")
+            return (False, 0, "")
 
     def __enter__(self) -> "Client":
         self.connect()

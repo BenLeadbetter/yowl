@@ -27,17 +27,20 @@ def poll_callback(timer_id: int | None = None) -> None:
 
     try:
         with Client() as client:
-            is_recording, text = client.poll()
+            is_recording, backspace_count, text = client.poll()
             if not is_recording:
                 # Daemon says it's idle, stop polling
                 polling_active = False
                 return
-            if text:
+            if backspace_count > 0 or text:
                 boss = get_boss()
                 if boss is not None:
                     w = boss.window_id_map.get(target_window_id)
                     if w is not None:
-                        w.paste_text(text)
+                        # Send backspaces to erase old text, then new text
+                        # Use paste_bytes to bypass bracketed paste processing
+                        output = "\x08" * backspace_count + text
+                        w.paste_bytes(output)
     except Exception:
         # Connection errors - stop polling
         polling_active = False

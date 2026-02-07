@@ -16,8 +16,10 @@ pub struct DaemonState {
     transcriber: StreamingTranscriber,
     recording: AtomicBool,
     worker_thread: Mutex<Option<JoinHandle<()>>>,
-    /// Tracks how much of the transcript has been sent to the client
-    last_polled_len: Mutex<usize>,
+    /// Text that has been finalized (audio aged out of buffer) - never backspace into this
+    committed_text: Mutex<String>,
+    /// Text we've sent but may still revise via backspaces
+    provisional_text: Mutex<String>,
 }
 
 impl DaemonState {
@@ -28,7 +30,8 @@ impl DaemonState {
             transcriber,
             recording: AtomicBool::new(false),
             worker_thread: Mutex::new(None),
-            last_polled_len: Mutex::new(0),
+            committed_text: Mutex::new(String::new()),
+            provisional_text: Mutex::new(String::new()),
         }))
     }
 
@@ -39,7 +42,8 @@ impl DaemonState {
 
         // Reset transcriber state from any previous recording
         self.transcriber.reset();
-        *self.last_polled_len.lock().unwrap() = 0;
+        *self.committed_text.lock().unwrap() = String::new();
+        *self.provisional_text.lock().unwrap() = String::new();
 
         // Spawn worker thread - AudioCapture must be created on this thread
         // because cpal::Stream is not Send
@@ -121,18 +125,68 @@ impl DaemonState {
             return "IDLE:".to_string();
         }
 
-        let text = self.transcriber.current_transcript();
-        let mut last_len = self.last_polled_len.lock().unwrap();
+        let new_transcript = self.transcriber.current_transcript();
+        let mut committed = self.committed_text.lock().unwrap();
+        let mut provisional = self.provisional_text.lock().unwrap();
 
-        // Only return new text since last poll
-        let delta = if text.len() > *last_len {
-            &text[*last_len..]
-        } else {
-            ""
-        };
+        if new_transcript.is_empty() {
+            return "RECORDING:0:".to_string();
+        }
 
-        *last_len = text.len();
-        format!("RECORDING:{}", delta)
+        // Find where the new transcript "picks up" relative to our provisional text.
+        // As audio ages out of the rolling buffer, text at the start of provisional
+        // will no longer appear in the new transcript.
+        let aging_point = Self::find_aging_point(&provisional, &new_transcript);
+
+        if aging_point > 0 {
+            // Text before aging_point has aged out - commit it
+            let to_commit: String = provisional.chars().take(aging_point).collect();
+            committed.push_str(&to_commit);
+            *provisional = provisional.chars().skip(aging_point).collect();
+        }
+
+        // Now diff new_transcript against the remaining provisional text
+        let common_len = provisional
+            .chars()
+            .zip(new_transcript.chars())
+            .take_while(|(a, b)| a == b)
+            .count();
+
+        let backspace_count = provisional.chars().count() - common_len;
+        let new_chars: String = new_transcript.chars().skip(common_len).collect();
+
+        // Update provisional to the new transcript
+        *provisional = new_transcript;
+
+        format!("RECORDING:{}:{}", backspace_count, new_chars)
+    }
+
+    /// Find how many characters from the start of provisional have "aged out"
+    /// by looking for where new_transcript's content appears in provisional.
+    fn find_aging_point(provisional: &str, new_transcript: &str) -> usize {
+        if provisional.is_empty() || new_transcript.is_empty() {
+            return 0;
+        }
+
+        // If new_transcript starts with provisional content, nothing has aged
+        if new_transcript.starts_with(provisional) || provisional.starts_with(new_transcript) {
+            return 0;
+        }
+
+        // Look for the start of new_transcript within provisional
+        // Try progressively shorter prefixes of new_transcript as search keys
+        let max_search_len = new_transcript.chars().count().min(30);
+
+        for key_len in (5..=max_search_len).rev() {
+            let search_key: String = new_transcript.chars().take(key_len).collect();
+            if let Some(byte_pos) = provisional.find(&search_key) {
+                // Found the key - everything before it has aged out
+                return provisional[..byte_pos].chars().count();
+            }
+        }
+
+        // No overlap found - likely a complete refresh, commit all provisional
+        provisional.chars().count()
     }
 
     pub fn is_recording(&self) -> bool {
