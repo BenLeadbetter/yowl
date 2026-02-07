@@ -1,99 +1,81 @@
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
-use std::thread::{self, JoinHandle};
-use std::time::{Duration, Instant};
-
 use crate::audio::AudioCapture;
+use crate::diff::TextTracker;
 use crate::whisper::StreamingTranscriber;
 
-/// How often to run whisper inference (ms)
 const TRANSCRIBE_INTERVAL_MS: u64 = 500;
-
-/// Rolling buffer duration for audio context
 const BUFFER_DURATION_SECS: u64 = 10;
 
 pub struct DaemonState {
     transcriber: StreamingTranscriber,
-    recording: AtomicBool,
-    worker_thread: Mutex<Option<JoinHandle<()>>>,
-    /// Text that has been finalized (audio aged out of buffer) - never backspace into this
-    committed_text: Mutex<String>,
-    /// Text we've sent but may still revise via backspaces
-    provisional_text: Mutex<String>,
+    recording: std::sync::atomic::AtomicBool,
+    worker_thread: std::sync::Mutex<Option<std::thread::JoinHandle<()>>>,
+    text_tracker: std::sync::Mutex<TextTracker>,
 }
 
 impl DaemonState {
-    pub fn new() -> Result<Arc<Self>, Box<dyn std::error::Error>> {
-        let transcriber = StreamingTranscriber::new(Duration::from_secs(BUFFER_DURATION_SECS))?;
+    pub fn new() -> Result<std::sync::Arc<Self>, Box<dyn std::error::Error>> {
+        let transcriber = StreamingTranscriber::new(std::time::Duration::from_secs(BUFFER_DURATION_SECS))?;
 
-        Ok(Arc::new(Self {
+        Ok(std::sync::Arc::new(Self {
             transcriber,
-            recording: AtomicBool::new(false),
-            worker_thread: Mutex::new(None),
-            committed_text: Mutex::new(String::new()),
-            provisional_text: Mutex::new(String::new()),
+            recording: std::sync::atomic::AtomicBool::new(false),
+            worker_thread: std::sync::Mutex::new(None),
+            text_tracker: std::sync::Mutex::new(TextTracker::new()),
         }))
     }
 
-    pub fn start_recording(self: &Arc<Self>) -> &'static str {
-        if self.recording.swap(true, Ordering::SeqCst) {
+    pub fn start_recording(self: &std::sync::Arc<Self>) -> &'static str {
+        if self.recording.swap(true, std::sync::atomic::Ordering::SeqCst) {
             return "ERROR already recording";
         }
 
-        // Reset transcriber state from any previous recording
+        // reset any previous recording session
         self.transcriber.reset();
-        *self.committed_text.lock().unwrap() = String::new();
-        *self.provisional_text.lock().unwrap() = String::new();
+        self.text_tracker.lock().unwrap().reset();
 
-        // Spawn worker thread - AudioCapture must be created on this thread
-        // because cpal::Stream is not Send
-        let state = Arc::clone(self);
-        let handle = thread::spawn(move || {
-            // Create audio capture on this thread
+        let state = std::sync::Arc::clone(self);
+        let handle = std::thread::spawn(move || {
             let capture = match AudioCapture::new() {
                 Ok(c) => c,
                 Err(e) => {
                     log::error!("Failed to create audio capture: {}", e);
-                    state.recording.store(false, Ordering::SeqCst);
+                    state.recording.store(false, std::sync::atomic::Ordering::SeqCst);
                     return;
                 }
             };
 
             if let Err(e) = capture.start() {
                 log::error!("Failed to start audio capture: {}", e);
-                state.recording.store(false, Ordering::SeqCst);
+                state.recording.store(false, std::sync::atomic::Ordering::SeqCst);
                 return;
             }
 
-            let mut last_transcribe = Instant::now();
-            let transcribe_interval = Duration::from_millis(TRANSCRIBE_INTERVAL_MS);
+            let mut last_transcribe = std::time::Instant::now();
+            let transcribe_interval = std::time::Duration::from_millis(TRANSCRIBE_INTERVAL_MS);
 
-            while state.recording.load(Ordering::SeqCst) {
-                // Collect audio samples from capture
-                while let Some(samples) = capture.try_recv() {
+            while state.recording.load(std::sync::atomic::Ordering::SeqCst) {
+                while let Some(samples) = capture.recv() {
                     state.transcriber.push_audio(&samples);
                 }
 
-                // Run transcription periodically
                 if last_transcribe.elapsed() >= transcribe_interval {
                     match state.transcriber.transcribe() {
                         Ok(Some(text)) => {
                             log::debug!("transcribed: {}", text);
                         }
                         Ok(None) => {
-                            // No change
+                            // no change
                         }
                         Err(e) => {
                             log::error!("Transcription error: {}", e);
                         }
                     }
-                    last_transcribe = Instant::now();
+                    last_transcribe = std::time::Instant::now();
                 }
 
-                thread::sleep(Duration::from_millis(10));
+                std::thread::sleep(std::time::Duration::from_millis(10));
             }
 
-            // Stop audio capture
             if let Err(e) = capture.stop() {
                 log::warn!("Error stopping capture: {}", e);
             }
@@ -107,11 +89,10 @@ impl DaemonState {
     }
 
     pub fn stop_recording(&self) -> &'static str {
-        if !self.recording.swap(false, Ordering::SeqCst) {
+        if !self.recording.swap(false, std::sync::atomic::Ordering::SeqCst) {
             return "ERROR not recording";
         }
 
-        // Wait for worker thread to finish
         if let Some(handle) = self.worker_thread.lock().unwrap().take() {
             let _ = handle.join();
         }
@@ -121,75 +102,16 @@ impl DaemonState {
     }
 
     pub fn poll(&self) -> String {
-        if !self.recording.load(Ordering::SeqCst) {
+        if !self.recording.load(std::sync::atomic::Ordering::SeqCst) {
             return "IDLE:".to_string();
         }
 
         let new_transcript = self.transcriber.current_transcript();
-        let mut committed = self.committed_text.lock().unwrap();
-        let mut provisional = self.provisional_text.lock().unwrap();
+        let mut tracker = self.text_tracker.lock().unwrap();
 
-        if new_transcript.is_empty() {
-            return "RECORDING:0:".to_string();
+        match tracker.update(&new_transcript) {
+            Some(result) => format!("RECORDING:{}:{}", result.backspaces, result.new_text),
+            None => "RECORDING:0:".to_string(),
         }
-
-        // Find where the new transcript "picks up" relative to our provisional text.
-        // As audio ages out of the rolling buffer, text at the start of provisional
-        // will no longer appear in the new transcript.
-        let aging_point = Self::find_aging_point(&provisional, &new_transcript);
-
-        if aging_point > 0 {
-            // Text before aging_point has aged out - commit it
-            let to_commit: String = provisional.chars().take(aging_point).collect();
-            committed.push_str(&to_commit);
-            *provisional = provisional.chars().skip(aging_point).collect();
-        }
-
-        // Now diff new_transcript against the remaining provisional text
-        let common_len = provisional
-            .chars()
-            .zip(new_transcript.chars())
-            .take_while(|(a, b)| a == b)
-            .count();
-
-        let backspace_count = provisional.chars().count() - common_len;
-        let new_chars: String = new_transcript.chars().skip(common_len).collect();
-
-        // Update provisional to the new transcript
-        *provisional = new_transcript;
-
-        format!("RECORDING:{}:{}", backspace_count, new_chars)
-    }
-
-    /// Find how many characters from the start of provisional have "aged out"
-    /// by looking for where new_transcript's content appears in provisional.
-    fn find_aging_point(provisional: &str, new_transcript: &str) -> usize {
-        if provisional.is_empty() || new_transcript.is_empty() {
-            return 0;
-        }
-
-        // If new_transcript starts with provisional content, nothing has aged
-        if new_transcript.starts_with(provisional) || provisional.starts_with(new_transcript) {
-            return 0;
-        }
-
-        // Look for the start of new_transcript within provisional
-        // Try progressively shorter prefixes of new_transcript as search keys
-        let max_search_len = new_transcript.chars().count().min(30);
-
-        for key_len in (5..=max_search_len).rev() {
-            let search_key: String = new_transcript.chars().take(key_len).collect();
-            if let Some(byte_pos) = provisional.find(&search_key) {
-                // Found the key - everything before it has aged out
-                return provisional[..byte_pos].chars().count();
-            }
-        }
-
-        // No overlap found - likely a complete refresh, commit all provisional
-        provisional.chars().count()
-    }
-
-    pub fn is_recording(&self) -> bool {
-        self.recording.load(Ordering::SeqCst)
     }
 }

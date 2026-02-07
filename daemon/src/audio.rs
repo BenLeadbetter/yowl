@@ -74,13 +74,8 @@ impl AudioCapture {
 
     /// Receive captured audio samples (16kHz mono f32).
     /// Returns None if no samples are available (non-blocking).
-    pub fn try_recv(&self) -> Option<Vec<f32>> {
-        self.receiver.try_recv().ok()
-    }
-
-    /// Receive captured audio samples, blocking until available.
     pub fn recv(&self) -> Option<Vec<f32>> {
-        self.receiver.recv().ok()
+        self.receiver.try_recv().ok()
     }
 }
 

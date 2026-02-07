@@ -1,4 +1,5 @@
 mod audio;
+mod diff;
 mod ipc;
 mod logging;
 mod state;
