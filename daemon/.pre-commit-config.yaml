@@ -1,0 +1,42 @@
+repos:
+  - repo: https://github.com/AndrejOrsula/pre-commit-cargo.git
+    rev: 0.5.0
+    hooks:
+      - id: cargo-fmt
+        stages: [pre-commit]
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.14.10
+    hooks:
+      - id: ruff-format
+  - repo: https://github.com/compilerla/conventional-pre-commit
+    rev: v4.3.0
+    hooks:
+      - id: conventional-pre-commit
+        stages: [commit-msg]
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: check-added-large-files
+        stages: [pre-commit]
+      - id: check-case-conflict
+        stages: [pre-commit]
+      - id: check-merge-conflict
+        stages: [pre-commit]
+      - id: check-toml
+        stages: [pre-commit]
+      - id: check-yaml
+        stages: [pre-commit]
+      - id: detect-private-key
+        stages: [pre-commit]
+      - id: mixed-line-ending
+        stages: [pre-commit]
+  - repo: https://github.com/codespell-project/codespell
+    rev: v2.4.1
+    hooks:
+      - id: codespell
+        args: [-I, codespell-ignore, -w]
+ci:
+  autofix_commit_msg: |
+    ci: [pre-commit.ci] auto fixes from pre-commit.com hooks
+    for more information, see https://pre-commit.ci
+  autoupdate_commit_msg: "ci: [pre-commit.ci] pre-commit autoupdate"
